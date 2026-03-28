@@ -6,8 +6,8 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from stable_baselines3 import DQN
-from stable_baselines3.common.callbacks import EvalCallback
 from envs.frozenlake_envs import make_env
+from callbacks.safety_eval_callback import SafetyEvalCallback
 
 configs = [
     {"name": "4x4_deterministic", "size": 4, "slippery": False},
@@ -15,7 +15,7 @@ configs = [
     {"name": "8x8_stochastic", "size": 8, "slippery": True},
 ]
 
-seeds = [0, 1, 2]  # mets [0,1,2,3,4] si tu veux 5 seeds
+seeds = [0, 1, 2]
 
 os.makedirs("models", exist_ok=True)
 os.makedirs("logs", exist_ok=True)
@@ -38,13 +38,13 @@ for config in configs:
         log_dir = f"./logs/dqn/{config['name']}/seed_{seed}/"
         os.makedirs(log_dir, exist_ok=True)
 
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=log_dir,
-            log_path=log_dir,
+        eval_callback = SafetyEvalCallback(
+            eval_env=eval_env,
             eval_freq=500,
+            n_eval_episodes=100,
+            log_path=log_dir,
             deterministic=True,
-            render=False
+            verbose=1
         )
 
         model = DQN(
