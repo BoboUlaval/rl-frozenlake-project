@@ -1,15 +1,35 @@
+"""
+Génère une figure compacte 3 panneaux côte-à-côte (un par cas d'étude),
+chacun avec récompense moyenne et taux de chute (IC 95 %), pour les
+4 variantes (DQN, PPO, DQN+Shield, PPO+Shield).
+
+Code couleurs :
+  - DQN  : bleu solide
+  - PPO  : orange solide
+  - DQN+Shield : bleu pointillé
+  - PPO+Shield : orange pointillé
+"""
 import os
 import math
 import numpy as np
 import matplotlib.pyplot as plt
 
+
 cases = [
-    "4x4_deterministic",
-    "4x4_stochastic",
-    "8x8_stochastic",
+    ("4x4_deterministic", "4×4 déterministe"),
+    ("4x4_stochastic",    "4×4 stochastique"),
+    ("8x8_stochastic",    "8×8 stochastique"),
 ]
 
-seeds = [0, 1, 2]
+seeds = list(range(30))
+
+# (label, dossier de logs, couleur, style)
+variants = [
+    ("DQN",        "logs/dqn",              "#1f77b4", "-"),
+    ("PPO",        "logs_ppo",              "#ff7f0e", "-"),
+    ("DQN+Shield", "logs/dqn_shielded",     "#1f77b4", "--"),
+    ("PPO+Shield", "logs_ppo/ppo_shielded", "#ff7f0e", "--"),
+]
 
 os.makedirs("results/figures_ic", exist_ok=True)
 
@@ -22,111 +42,78 @@ def moving_average(x, window=3):
 
 def load_metric_curves(base_dir, case, metric_name):
     all_values = []
-    timesteps_ref = None
-
+    all_timesteps = []
     for seed in seeds:
         path = f"{base_dir}/{case}/seed_{seed}/evaluations_safety.npz"
         if not os.path.exists(path):
-            print(f"Fichier manquant: {path}")
             return None, None, None
+        d = np.load(path)
+        all_timesteps.append(d["timesteps"])
+        all_values.append(d[metric_name])
 
-        data = np.load(path)
-        timesteps = data["timesteps"]
-        values = data[metric_name]
-
-        if timesteps_ref is None:
-            timesteps_ref = timesteps
-
-        all_values.append(values)
+    min_len = min(len(v) for v in all_values)
+    if min_len <= 1:
+        return None, None, None
+    trim = min_len - 1
+    all_values = [v[:trim] for v in all_values]
+    timesteps_ref = all_timesteps[0][:trim]
 
     arr = np.array(all_values, dtype=float)
     mean = arr.mean(axis=0)
-
     if len(seeds) > 1:
         std = arr.std(axis=0, ddof=1)
         ic95 = 1.96 * std / math.sqrt(len(seeds))
     else:
         ic95 = np.zeros_like(mean)
-
     return timesteps_ref, moving_average(mean), ic95
 
 
-for case in cases:
-    dqn_t_reward, dqn_reward_mean, dqn_reward_ic = load_metric_curves(
-        "logs/dqn", case, "mean_rewards"
-    )
-    ppo_t_reward, ppo_reward_mean, ppo_reward_ic = load_metric_curves(
-        "logs_ppo", case, "mean_rewards"
-    )
+def plot_pair(ax_reward, ax_hole, base_dir, case, label, color, style):
+    t, r_mean, r_ic = load_metric_curves(base_dir, case, "mean_rewards")
+    _, h_mean, h_ic = load_metric_curves(base_dir, case, "hole_rates")
+    if t is None:
+        print(f"  Données manquantes : {label} / {case}")
+        return
+    ax_reward.plot(t, r_mean, label=label, color=color,
+                   linestyle=style, linewidth=1.5)
+    ax_reward.fill_between(t, r_mean - r_ic, r_mean + r_ic,
+                           alpha=0.15, color=color)
+    ax_hole.plot(t, h_mean, label=label, color=color,
+                 linestyle=style, linewidth=1.5)
+    ax_hole.fill_between(t, h_mean - h_ic, h_mean + h_ic,
+                         alpha=0.15, color=color)
 
-    dqn_t_hole, dqn_hole_mean, dqn_hole_ic = load_metric_curves(
-        "logs/dqn", case, "hole_rates"
-    )
-    ppo_t_hole, ppo_hole_mean, ppo_hole_ic = load_metric_curves(
-        "logs_ppo", case, "hole_rates"
-    )
 
-    if any(x is None for x in [
-        dqn_t_reward, dqn_reward_mean, dqn_reward_ic,
-        ppo_t_reward, ppo_reward_mean, ppo_reward_ic,
-        dqn_t_hole, dqn_hole_mean, dqn_hole_ic,
-        ppo_t_hole, ppo_hole_mean, ppo_hole_ic
-    ]):
-        continue
+fig, axes = plt.subplots(2, 3, figsize=(13.5, 5.6), sharey="row")
 
-    fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.2), sharex=True)
+for col, (case_key, case_title) in enumerate(cases):
+    ax_r = axes[0, col]
+    ax_h = axes[1, col]
+    for label, base_dir, color, style in variants:
+        plot_pair(ax_r, ax_h, base_dir, case_key, label, color, style)
 
-    axes[0].plot(dqn_t_reward, dqn_reward_mean, label="DQN")
-    axes[0].fill_between(
-        dqn_t_reward,
-        dqn_reward_mean - dqn_reward_ic,
-        dqn_reward_mean + dqn_reward_ic,
-        alpha=0.2
-    )
+    ax_r.set_title(case_title, fontsize=11)
+    ax_r.grid(True, alpha=0.3)
+    ax_h.grid(True, alpha=0.3)
+    ax_h.set_xlabel("Pas d'entraînement", fontsize=9)
+    ax_h.set_ylim(-0.02, 1.02)
+    for ax in (ax_r, ax_h):
+        ax.tick_params(axis="x", labelsize=8)
+        ax.tick_params(axis="y", labelsize=8)
 
-    axes[0].plot(ppo_t_reward, ppo_reward_mean, label="PPO")
-    axes[0].fill_between(
-        ppo_t_reward,
-        ppo_reward_mean - ppo_reward_ic,
-        ppo_reward_mean + ppo_reward_ic,
-        alpha=0.2
-    )
+axes[0, 0].set_ylabel("Récompense moyenne", fontsize=10)
+axes[1, 0].set_ylabel("Taux de chute", fontsize=10)
 
-    axes[0].set_ylabel("Reward moyen")
-    axes[0].set_title("Récompense moyenne")
-    axes[0].grid(True)
-    axes[0].legend()
+handles, labels = axes[0, 0].get_legend_handles_labels()
+fig.legend(handles, labels, loc="upper center", ncol=4,
+           bbox_to_anchor=(0.5, 1.02), frameon=False, fontsize=10)
 
-    axes[1].plot(dqn_t_hole, dqn_hole_mean, label="DQN")
-    axes[1].fill_between(
-        dqn_t_hole,
-        dqn_hole_mean - dqn_hole_ic,
-        dqn_hole_mean + dqn_hole_ic,
-        alpha=0.2
-    )
+plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    axes[1].plot(ppo_t_hole, ppo_hole_mean, label="PPO")
-    axes[1].fill_between(
-        ppo_t_hole,
-        ppo_hole_mean - ppo_hole_ic,
-        ppo_hole_mean + ppo_hole_ic,
-        alpha=0.2
-    )
+out_pdf = "results/figures_ic/all_methods_combined.pdf"
+out_png = "results/figures_ic/all_methods_combined.png"
+plt.savefig(out_pdf, bbox_inches="tight")
+plt.savefig(out_png, dpi=180, bbox_inches="tight")
+plt.close()
 
-    axes[1].set_xlabel("Nombre de pas d'entraînement")
-    axes[1].set_ylabel("Taux de chute")
-    axes[1].set_title("Taux de chute")
-    axes[1].set_ylim(-0.02, 1.02)
-    axes[1].grid(True)
-
-    case_title = case.replace("_", " ")
-    fig.suptitle(f"Évolution des métriques avec IC 95 %\n{case_title}", fontsize=12)
-    plt.tight_layout()
-
-    output_path = f"results/figures_ic/{case}_combined_curve_ic95.png"
-    plt.savefig(output_path, dpi=200, bbox_inches="tight")
-    plt.close()
-
-    print(f"Figure sauvegardée : {output_path}")
-
-print("Graphiques combinés avec IC 95 % terminés.")
+print(f"Figures sauvegardées :\n  {out_pdf}\n  {out_png}")
