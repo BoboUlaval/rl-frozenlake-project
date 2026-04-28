@@ -48,8 +48,7 @@ class Shield:
         # u[s] = probabilité minimale d'atteindre un trou (en suivant la
         # politique pessimiste), avec u^0[s] = 1 si s est un trou, 0 sinon
         u = np.zeros(self.n_states)
-        for h in self.holes:
-            u[h] = 1.0
+        u[list(self.holes)] = 1.0
 
         # Value iteration
         p_unsafe = None
