@@ -90,8 +90,8 @@ class Shield:
             mask[a] = True
         return mask
 
-    def is_safe(self, state, action):
+    def is_safe(self, state, action) -> bool:
         return action in self.safe_actions[state]
-
+    
     def safe_action_set(self, state):
         return self.safe_actions[state]
